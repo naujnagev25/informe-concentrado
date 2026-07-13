@@ -31,7 +31,7 @@ if archivo_ax is not None:
             for col in df.columns:
                 if any(p in str(col).lower() for p in palabras_clave):
                     return col
-                return None
+            return None
 
         col_codigo = buscar_columna(df_original, ['código ax', 'codigo ax', 'artículo', 'articulo', 'item'])
         col_concentrado = buscar_columna(df_original, ['concentrado', 'nombre', 'producto'])
@@ -50,7 +50,6 @@ if archivo_ax is not None:
         df_limpio[col_codigo] = df_limpio[col_codigo].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
         
         # --- FILTRO ESTRICTO DE CONCENTRADOS SOLICITADOS ---
-        # Convertimos a minúsculas temporalmente para que la búsqueda sea inmune a errores de mayúsculas en AX365
         df_limpio['Concentrado_Minuscula'] = df_limpio[col_concentrado].astype(str).str.lower().str.strip()
         
         condicion_mci = df_limpio['Concentrado_Minuscula'].str.contains('mci tinter', na=False)
@@ -170,3 +169,6 @@ if archivo_ax is not None:
                         st.info("No se registraron movimientos.")
                 with tab2:
                     columnas_finales = [col_codigo, col_concentrado, 'stock sistema en inventario (unid)', 'Consumo Registrado Semanal']
+                    st.dataframe(df_final[columnas_finales], use_container_width=True)
+
+    except Exception as e:
