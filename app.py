@@ -64,37 +64,50 @@ if archivo_ax is not None:
         st.warning("⚠️ No se encontraron productos MCI TINTER, TWIST o Transparentes Óxido en la pestaña seleccionada. Revisa el archivo.")
         st.stop()
     
-    # --- INYECCIÓN DE COLUMNAS PARA INGRESO MANUAL ---
+    # --- AUTOMATIZACIÓN: INYECTAR COLUMNAS MODIFICABLES LIMPIAS ---
+    # Forzamos valores float iniciales para que el sistema reconozca que son celdas numéricas ingresables
     df_filtrado['Inventario Físico Bodega (A mano)'] = 0.0
     df_filtrado['Inventario Máquina (A mano)'] = 0.0
     df_filtrado['Consumo Registrado Semanal'] = 0.0
 
     st.subheader(f"📝 2. Módulo de Entrada Manual ({len(df_filtrado)} filas filtradas)")
-    st.info("La tabla ahora muestra SOLO tus concentrados específicos. Haz doble clic para registrar tus datos a mano.")
+    st.info("💡 Haz doble clic sobre cualquier celda de las columnas grises de la derecha para escribir tus datos.")
 
     # Definir las columnas visibles en la cuadrícula de la pantalla
     columnas_pantalla = [col_codigo, col_concentrado]
-    if col_lote: columnas_pantalla.append(col_lote)
+    if col_lote: 
+        columnas_pantalla.append(col_lote)
     columnas_pantalla.extend(['Inventario Físico Bodega (A mano)', 'Inventario Máquina (A mano)', 'Consumo Registrado Semanal'])
 
-    # Renderizar la tabla interactiva filtrada
+    # CONFIGURACIÓN EXPLÍCITA DE PERMISOS DE ESCRITURA EN STREAMLIT
+    configuracion_columnas = {
+        col_codigo: st.column_config.TextColumn("Código AX", disabled=True),
+        col_concentrado: st.column_config.TextColumn("Concentrado", disabled=True),
+        'Inventario Físico Bodega (A mano)': st.column_config.NumberColumn("Inventario Bodega", min_value=0.0, format="%.4f", required=True),
+        'Inventario Máquina (A mano)': st.column_config.NumberColumn("Inventario Máquina", min_value=0.0, format="%.4f", required=True),
+        'Consumo Registrado Semanal': st.column_config.NumberColumn("Consumo Semanal", min_value=0.0, format="%.4f", required=True)
+    }
+    if col_lote:
+        configuracion_columnas[col_lote] = st.column_config.TextColumn("Lotes consumidos", disabled=True)
+
+    # Renderizar la tabla interactiva forzando la habilitación de escritura en los campos numéricos
     df_ingresado = st.data_editor(
         df_filtrado[columnas_pantalla],
         use_container_width=True,
-        num_rows="dynamic",
-        disabled=[col_codigo, col_concentrado, col_lote] if col_lote else [col_codigo, col_concentrado]
+        num_rows="fixed", # Bloquear añadir filas nuevas para no corromper el AX365
+        column_config=configuracion_columnas
     )
 
     # --- PROCESAMIENTO MATEMÁTICO AL PRESIONAR EL BOTÓN ---
     if st.button("⚡ 3. Generar Informe y Aplicar FIFO", type="primary"):
         with st.spinner("Procesando datos filtrados y ejecutando descuentos por antigüedad..."):
             
-            # Saneamiento de las entradas manuales
+            # Saneamiento riguroso de las entradas manuales por si quedaron celdas vacías
             df_ingresado['Inventario Físico Bodega (A mano)'] = pd.to_numeric(df_ingresado['Inventario Físico Bodega (A mano)'], errors='coerce').fillna(0)
             df_ingresado['Inventario Máquina (A mano)'] = pd.to_numeric(df_ingresado['Inventario Máquina (A mano)'], errors='coerce').fillna(0)
             df_ingresado['Consumo Registrado Semanal'] = pd.to_numeric(df_ingresado['Consumo Registrado Semanal'], errors='coerce').fillna(0)
             
-            # Cálculo automático de Stock Físico Sistema
+            # CÁLCULO DE LA COLUMNA REQUERIDA: Suma de Bodega + Máquina
             df_ingresado['stock sistema en inventario (unid)'] = df_ingresado['Inventario Físico Bodega (A mano)'] + df_ingresado['Inventario Máquina (A mano)']
             
             df_final = df_ingresado.copy()
@@ -162,10 +175,3 @@ if archivo_ax is not None:
             # Desplegar visualización de resultados
             tab1, tab2 = st.tabs(["📊 Ver Lotes Consumidos (FIFO)", "🗄️ Ver Planilla de Stock Final"])
             with tab1:
-                if reporte_bajas:
-                    st.dataframe(pd.DataFrame(reporte_bajas), use_container_width=True)
-                else:
-                    st.info("No se registraron movimientos.")
-            with tab2:
-                columnas_finales = [col_codigo, col_concentrado, 'stock sistema en inventario (unid)', 'Consumo Registrado Semanal']
-                st.dataframe(df_final[columnas_finales], use_container_width=True)
