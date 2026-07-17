@@ -179,6 +179,3 @@ if archivo_ax is not None:
                                 'Código AX': codigo_ax,
                                 'Concentrado': df_proc.at[idx, col_concentrado],
                                 'Lote': df_proc.at[idx, col_lote] if col_lote else "N/A",
-
-                            
-
