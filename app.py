@@ -59,11 +59,9 @@ if archivo_ax is not None:
         df_limpio = df_original.dropna(subset=[col_codigo, col_concentrado]).copy()
         df_limpio[col_codigo] = df_limpio[col_codigo].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
         
-        # --- PROCESAMIENTO DE FECHAS (NUEVO) ---
+        # --- PROCESAMIENTO DE FECHAS ---
         if col_fecha:
-            # Convertir a formato fecha de pandas forzando errores a NaT (fechas inválidas)
             df_limpio[col_fecha] = pd.to_datetime(df_limpio[col_fecha], errors='coerce')
-            # Ordenar: Las fechas más antiguas quedan al principio, las celdas vacías/NaT al final
             df_limpio = df_limpio.sort_values(by=[col_fecha], ascending=True, na_position='last')
             st.toast("📅 Lotes ordenados por fecha de ingreso correctamente.", icon="⏳")
         else:
@@ -130,7 +128,6 @@ if archivo_ax is not None:
         if col_fecha: columnas_pantalla.append(col_fecha)
         columnas_pantalla.extend(['Inventario Físico Bodega (A mano)', 'Inventario Máquina (A mano)', 'Consumo Registrado Semanal'])
 
-        # Formatear la visualización de la fecha en la tabla si existe
         config_columnas = {}
         if col_fecha:
             config_columnas[col_fecha] = st.column_config.DatetimeColumn(format="DD/MM/YYYY")
@@ -152,7 +149,7 @@ if archivo_ax is not None:
                 df_proc['Inventario Máquina (A mano)'] = pd.to_numeric(df_proc['Inventario Máquina (A mano)'], errors='coerce').fillna(0)
                 df_proc['Consumo Registrado Semanal'] = pd.to_numeric(df_proc['Consumo Registrado Semanal'], errors='coerce').fillna(0)
                 
-                df_proc['stock sistema en inventario (unid)'] = df_proc['Inventario Físico Bodega (A mano)'] + df_proc['Inventario Máquina (A mano)']
+                df_proc['stock sistema en inventory (unid)'] = df_proc['Inventario Físico Bodega (A mano)'] + df_proc['Inventario Máquina (A mano)']
                 
                 dict_consumos = df_proc.groupby(col_codigo)['Consumo Registrado Semanal'].sum().to_dict()
                 reporte_bajas = []
@@ -163,18 +160,25 @@ if archivo_ax is not None:
                         continue
                         
                     gasto_restante = gasto_total
-                    # Al estar previamente ordenados, indices_lotes sigue estrictamente el orden de la fecha de ingreso
                     indices_lotes = df_proc[df_proc[col_codigo] == codigo_ax].index 
                     
                     for idx in indices_lotes:
                         if gasto_restante <= 0:
                             break
                             
-                        stock_lote_actual = df_proc.at[idx, 'stock sistema en inventario (unid)']
+                        stock_lote_actual = df_proc.at[idx, 'stock sistema en inventory (unid)']
                         
                         if stock_lote_actual > 0:
                             descuento = min(stock_lote_actual, gasto_restante)
-                            df_proc.at[idx, 'stock sistema en inventario (unid)'] -= descuento
+                            df_proc.at[idx, 'stock sistema en inventory (unid)'] -= descuento
                             gasto_restante -= descuento
+                            
+                            fecha_str = df_proc.at[idx, col_fecha].strftime('%d/%m/%Y') if col_fecha and pd.notna(df_proc.at[idx, col_fecha]) else "No registrada"
+                            
+                            reporte_bajas.append({
+                                'Código AX': codigo_ax,
+                                'Concentrado': df_proc.at[idx, col_concentrado],
+                                'Lote': df_proc.at[idx, col_lote] if col_lote else "N/A",
+
                             
 
