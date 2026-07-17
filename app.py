@@ -74,11 +74,10 @@ if archivo_ax is not None:
             st.stop()
         
         # --- PROCESAMIENTO DE CARGAS ADICIONALES (BODEGA Y MÁQUINA) ---
-        # Inicializar diccionarios de mapeo vacíos
         dict_bodega = {}
         dict_maquina = {}
         
-        def procesar_archivo_externo(archivo):
+        def procesar_archivo_extern(archivo):
             if archivo.name.endswith('.csv'):
                 df_ext = pd.read_csv(archivo)
             else:
@@ -95,11 +94,11 @@ if archivo_ax is not None:
             return {}
 
         if archivo_bodega is not None:
-            dict_bodega = procesar_archivo_externo(archivo_bodega)
+            dict_bodega = procesar_archivo_extern(archivo_bodega)
             st.toast("✅ Datos de Bodega cargados con éxito", icon="📦")
             
         if archivo_maquina is not None:
-            dict_maquina = procesar_archivo_externo(archivo_maquina)
+            dict_maquina = procesar_archivo_extern(archivo_maquina)
             st.toast("✅ Datos de la Máquina cargados con éxito", icon="⚙️")
 
         # --- INYECCIÓN Y CRUCE DE DATOS ---
@@ -180,3 +179,4 @@ if archivo_ax is not None:
                 st.download_button(
                     label="📥 Descargar Informe Concentrado Semanal (.xlsx)",
                     data=salida_excel,
+                    file_name="Informe_Concentrado_Semanal.xlsx",
