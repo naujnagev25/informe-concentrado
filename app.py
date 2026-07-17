@@ -25,6 +25,13 @@ with col2:
 with col3:
     archivo_bodega = st.file_uploader("📥 Stock Físico Bodega (.xlsx, .csv)", type=["xlsx", "csv"])
 
+# Función renombrada para romper el caché del compilador de Streamlit
+def detectar_columna_ax(df, palabras_clave):
+    for col in df.columns:
+        if any(p in str(col).lower() for p in palabras_clave):
+            return col
+    return None
+
 if archivo_ax is not None:
     try:
         excel_book = pd.ExcelFile(archivo_ax)
@@ -36,16 +43,10 @@ if archivo_ax is not None:
         df_original.columns = df_original.columns.str.strip()
         
         # --- DETECCIÓN AUTOMÁTICA DE COLUMNAS ---
-        def buscar_columna(df, palabras_clave):
-            for col in df.columns:
-                if any(p in str(col).lower() for p in palabras_clave):
-                    return col
-            return None
-
-        col_codigo = buscar_columna(df_original, ['código ax', 'codigo ax', 'artículo', 'articulo', 'item'])
-        col_concentrado = buscar_columna(df_original, ['concentrado', 'nombre', 'producto'])
-        col_lote = buscar_columna(df_original, ['lotes consumidos', 'lote', 'batch', 'número de lote'])
-        col_fecha = buscar_columna(df_original, ['fecha', 'ingreso', 'creación', 'creacion', 'registro', 'f. ingreso'])
+        col_codigo = detectar_columna_ax(df_original, ['código ax', 'codigo ax', 'artículo', 'articulo', 'item'])
+        col_concentrado = detectar_columna_ax(df_original, ['concentrado', 'nombre', 'producto'])
+        col_lote = detectar_columna_ax(df_original, ['lotes consumidos', 'lote', 'batch', 'número de lote'])
+        col_fecha = detectar_columna_ax(df_original, ['fecha', 'ingreso', 'creación', 'creacion', 'registro', 'f. ingreso'])
         
         if not col_codigo:
             st.error("🚨 Error: No se encontró la columna de 'Código AX' en el archivo de AX365.")
@@ -97,8 +98,8 @@ if archivo_ax is not None:
                 df_ext = pd.read_excel(archivo)
             df_ext.columns = df_ext.columns.str.strip()
             
-            c_cod = buscar_columna(df_ext, ['código ax', 'codigo ax', 'artículo', 'articulo', 'item'])
-            c_cant = buscar_columna(df_ext, ['cantidad', 'stock', 'físico', 'fisico', 'total', 'unidades'])
+            c_cod = detectar_columna_ax(df_ext, ['código ax', 'codigo ax', 'artículo', 'articulo', 'item'])
+            c_cant = detectar_columna_ax(df_ext, ['cantidad', 'stock', 'físico', 'fisico', 'total', 'unidades'])
             
             if c_cod and c_cant:
                 df_ext[c_cod] = df_ext[c_cod].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
@@ -153,10 +154,8 @@ if archivo_ax is not None:
                 
                 dict_consumos = df_proc.groupby(col_codigo)['Consumo Registrado Semanal'].sum().to_dict()
                 
-                # REPORTE REESTRUCTURADO COMO LISTA PLANA (ELIMINA LLAVES '{}' CONFLICTIVAS)
                 reporte_bajas = []
                 columnas_reporte = ['Código AX', 'Concentrado', 'Lote', 'Fecha de Ingreso', 'Cantidad Consumida', 'Stock Restante en Lote']
-                
                 alertas_quiebre = []
 
                 for codigo_ax, gasto_total in dict_consumos.items():
@@ -177,4 +176,5 @@ if archivo_ax is not None:
                             df_proc.at[idx, 'stock sistema en inventory (unid)'] -= descuento
                             gasto_restante -= descuento
                             
-                            fecha_str = df_proc.at[idx, col_fecha].strftime('%d/%m/%Y') if col_fecha and pd.notna(df_proc.at[idx, col_fecha]) else "N/A"
+                            val_fecha = df_proc.at[idx, col_fecha] if col_fecha else None
+                            fecha_str = val_fecha.strftime('%d/%m/%Y') if col_fecha and pd.notna(val_fecha) else "N/A"
