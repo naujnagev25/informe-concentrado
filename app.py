@@ -149,11 +149,14 @@ if archivo_ax is not None:
                 df_proc['Inventario Máquina (A mano)'] = pd.to_numeric(df_proc['Inventario Máquina (A mano)'], errors='coerce').fillna(0)
                 df_proc['Consumo Registrado Semanal'] = pd.to_numeric(df_proc['Consumo Registrado Semanal'], errors='coerce').fillna(0)
                 
-                # Sumar el stock disponible de forma limpia
                 df_proc['stock sistema en inventory (unid)'] = df_proc['Inventario Físico Bodega (A mano)'] + df_proc['Inventario Máquina (A mano)']
                 
                 dict_consumos = df_proc.groupby(col_codigo)['Consumo Registrado Semanal'].sum().to_dict()
+                
+                # REPORTE REESTRUCTURADO COMO LISTA PLANA (ELIMINA LLAVES '{}' CONFLICTIVAS)
                 reporte_bajas = []
+                columnas_reporte = ['Código AX', 'Concentrado', 'Lote', 'Fecha de Ingreso', 'Cantidad Consumida', 'Stock Restante en Lote']
+                
                 alertas_quiebre = []
 
                 for codigo_ax, gasto_total in dict_consumos.items():
@@ -175,7 +178,3 @@ if archivo_ax is not None:
                             gasto_restante -= descuento
                             
                             fecha_str = df_proc.at[idx, col_fecha].strftime('%d/%m/%Y') if col_fecha and pd.notna(df_proc.at[idx, col_fecha]) else "N/A"
-                            
-                            datos_lote = {
-                                'Código AX': codigo_ax,
-                                'Concentrado': df_proc.at[idx, col_concentrado],
