@@ -7,23 +7,23 @@ st.set_page_config(page_title="Informe Concentrado Semanal", page_icon="📋", l
 
 st.title("📋 Informe Concentrado Semanal - Tienda Curicó")
 st.markdown("""
-### Proceso de Carga y Consolidación:
-1. **Sube tu archivo base de AX365** (Filtra automáticamente *MCI TINTER, TWIST y Transparentes*).
-2. **Opcional:** Sube las planillas de inventario de **Bodega** y/o **Máquina** para cargar los datos automáticamente.
-3. **Corrige o completa a mano** cualquier dato directamente en la tabla interactiva si es necesario.
-4. El sistema calculará el inventario total y procesará el descuento de lotes mediante el método FIFO.
+### Proceso de Carga y Consolidación de Datos:
+1. **Carga los tres archivos independientes** (AX365, Stock de Máquina y Stock Físico).
+2. El sistema filtrará automáticamente los concentrados *MCI TINTER, TWIST y Transparentes*.
+3. El sistema **ordenará automáticamente los lotes por fecha de ingreso** (de la más antigua a la más nueva).
+4. Al procesar, el sistema analizará qué lote se consumió según su orden cronológico de entrada en AX.
 """)
 
-# --- SECCIÓN DE CARGA DE ARCHIVOS ---
-st.subheader("📁 1. Carga de Documentos")
+# --- SECCIÓN DE CARGA DE ARCHIVOS INDEPENDIENTES ---
+st.subheader("📁 1. Accesos para Carga de Datos")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    archivo_ax = st.file_uploader("Base de AX365 (.xlsx)", type=["xlsx"])
+    archivo_ax = st.file_uploader("📥 Datos de AX365 (.xlsx)", type=["xlsx"], help="Base principal con códigos, lotes y fechas del ERP")
 with col2:
-    archivo_bodega = st.file_uploader("Opcional: Stock Físico Bodega (.xlsx, .csv)", type=["xlsx", "csv"])
+    archivo_maquina = st.file_uploader("📥 Stock de la Máquina (.xlsx, .csv)", type=["xlsx", "csv"])
 with col3:
-    archivo_maquina = st.file_uploader("Opcional: Stock de la Máquina (.xlsx, .csv)", type=["xlsx", "csv"])
+    archivo_bodega = st.file_uploader("📥 Stock Físico Bodega (.xlsx, .csv)", type=["xlsx", "csv"])
 
 if archivo_ax is not None:
     try:
@@ -31,11 +31,11 @@ if archivo_ax is not None:
         hojas = excel_book.sheet_names
         hoja_seleccionada = st.selectbox("Selecciona la pestaña del reporte AX365:", hojas, index=0)
         
-        # Leer la planilla original del ERP
+        # Leer la planilla original de AX365
         df_original = pd.read_excel(archivo_ax, sheet_name=hoja_seleccionada)
         df_original.columns = df_original.columns.str.strip()
         
-        # --- DETECCIÓN AUTOMÁTICA DE DATOS AX365 ---
+        # --- DETECCIÓN AUTOMÁTICA DE COLUMNAS ---
         def buscar_columna(df, palabras_clave):
             for col in df.columns:
                 if any(p in str(col).lower() for p in palabras_clave):
@@ -45,39 +45,54 @@ if archivo_ax is not None:
         col_codigo = buscar_columna(df_original, ['código ax', 'codigo ax', 'artículo', 'articulo', 'item'])
         col_concentrado = buscar_columna(df_original, ['concentrado', 'nombre', 'producto'])
         col_lote = buscar_columna(df_original, ['lotes consumidos', 'lote', 'batch', 'número de lote'])
+        col_fecha = buscar_columna(df_original, ['fecha', 'ingreso', 'creación', 'creacion', 'registro', 'f. ingreso'])
         
         if not col_codigo:
-            st.error("🚨 Error: No se encontró la columna de 'Código AX' en el archivo.")
+            st.error("🚨 Error: No se encontró la columna de 'Código AX' en el archivo de AX365.")
             st.stop()
             
         if not col_concentrado:
-            st.error("🚨 Error: No se encontró la columna de descripción del producto ('Concentrado').")
+            st.error("🚨 Error: No se encontró la columna de descripción del producto ('Concentrado') en AX365.")
             st.stop()
 
-        # Limpieza de la base AX365
+        # Limpieza inicial de la base de datos
         df_limpio = df_original.dropna(subset=[col_codigo, col_concentrado]).copy()
         df_limpio[col_codigo] = df_limpio[col_codigo].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
         
-        # --- FILTRO ESTRICTO DE CONCENTRADOS ---
+        # --- PROCESAMIENTO DE FECHAS (NUEVO) ---
+        if col_fecha:
+            # Convertir a formato fecha de pandas forzando errores a NaT (fechas inválidas)
+            df_limpio[col_fecha] = pd.to_datetime(df_limpio[col_fecha], errors='coerce')
+            # Ordenar: Las fechas más antiguas quedan al principio, las celdas vacías/NaT al final
+            df_limpio = df_limpio.sort_values(by=[col_fecha], ascending=True, na_position='last')
+            st.toast("📅 Lotes ordenados por fecha de ingreso correctamente.", icon="⏳")
+        else:
+            st.warning("⚠️ No se detectó una columna de 'Fecha' o 'Ingreso'. El sistema usará el orden original del archivo.")
+        
+        # --- FILTRO ESTRICTO DE CONCENTRADOS SOLICITADOS ---
         df_limpio['Concentrado_Minuscula'] = df_limpio[col_concentrado].astype(str).str.lower().str.strip()
         
         condicion_mci = df_limpio['Concentrado_Minuscula'].str.contains('mci tinter', na=False)
         condicion_twist = df_limpio['Concentrado_Minuscula'].str.contains('twist', na=False)
-        condicion_rojo_ox = df_limpio['Concentrado_Minuscula'].str.contains('transparente rojo', na=False) | (df_limpio['Concentrado_Minuscula'].str.contains('transparente', na=False) & df_limpio['Concentrado_Minuscula'].str.contains('rojo', na=False))
-        condicion_amarillo_ox = df_limpio['Concentrado_Minuscula'].str.contains('transparente amarillo', na=False) | (df_limpio['Concentrado_Minuscula'].str.contains('transparente', na=False) & df_limpio['Concentrado_Minuscula'].str.contains('amarillo', na=False))
+        
+        condicion_rojo_ox = (df_limpio['Concentrado_Minuscula'].str.contains('transparente rojo', na=False) | 
+                             (df_limpio['Concentrado_Minuscula'].str.contains('transparente', na=False) & df_limpio['Concentrado_Minuscula'].str.contains('rojo', na=False)))
+                             
+        condicion_amarillo_ox = (df_limpio['Concentrado_Minuscula'].str.contains('transparente amarillo', na=False) | 
+                                 (df_limpio['Concentrado_Minuscula'].str.contains('transparente', na=False) & df_limpio['Concentrado_Minuscula'].str.contains('amarillo', na=False)))
         
         df_filtrado = df_limpio[condicion_mci | condicion_twist | condicion_rojo_ox | condicion_amarillo_ox].copy()
         df_filtrado = df_filtrado.drop(columns=['Concentrado_Minuscula'])
         
         if df_filtrado.empty:
-            st.warning("⚠️ No se encontraron los concentrados solicitados en la pestaña seleccionada.")
+            st.warning("⚠️ No se encontraron concentrados válidos en la pestaña seleccionada.")
             st.stop()
         
-        # --- PROCESAMIENTO DE CARGAS ADICIONALES (BODEGA Y MÁQUINA) ---
-        dict_bodega = {}
+        # --- PROCESAMIENTO DE CARGAS DE STOCK ---
         dict_maquina = {}
+        dict_bodega = {}
         
-        def procesar_archivo_extern(archivo):
+        def procesar_archivo_externo(archivo):
             if archivo.name.endswith('.csv'):
                 df_ext = pd.read_csv(archivo)
             else:
@@ -93,39 +108,45 @@ if archivo_ax is not None:
                 return df_ext.groupby(c_cod)[c_cant].sum().to_dict()
             return {}
 
-        if archivo_bodega is not None:
-            dict_bodega = procesar_archivo_extern(archivo_bodega)
-            st.toast("✅ Datos de Bodega cargados con éxito", icon="📦")
-            
         if archivo_maquina is not None:
-            dict_maquina = procesar_archivo_extern(archivo_maquina)
-            st.toast("✅ Datos de la Máquina cargados con éxito", icon="⚙️")
+            dict_maquina = procesar_archivo_externo(archivo_maquina)
+            st.toast("✅ Datos de la Máquina vinculados", icon="⚙️")
+            
+        if archivo_bodega is not None:
+            dict_bodega = procesar_archivo_externo(archivo_bodega)
+            st.toast("✅ Datos de Bodega vinculados", icon="📦")
 
-        # --- INYECCIÓN Y CRUCE DE DATOS ---
+        # --- CRUCE AUTOMÁTICO DE DATOS ---
         df_filtrado['Inventario Físico Bodega (A mano)'] = df_filtrado[col_codigo].map(dict_bodega).fillna(0.0)
         df_filtrado['Inventario Máquina (A mano)'] = df_filtrado[col_codigo].map(dict_maquina).fillna(0.0)
         df_filtrado['Consumo Registrado Semanal'] = 0.0
 
         # --- MÓDULO INTERACTIVO DE PANTALLA ---
-        st.subheader(f"📝 2. Módulo de Revisión y Entrada Manual ({len(df_filtrado)} filas)")
-        st.info("Los datos de los archivos subidos se cruzaron automáticamente. Puedes modificarlos o completarlos abajo.")
+        st.subheader(f"📝 2. Módulo de Validación y Ajustes ({len(df_filtrado)} filas ordenadas por antigüedad)")
+        st.info("La tabla ya viene ordenada con los registros más antiguos arriba. Digita los consumos de la semana.")
 
         columnas_pantalla = [col_codigo, col_concentrado]
-        if col_lote: 
-            columnas_pantalla.append(col_lote)
+        if col_lote: columnas_pantalla.append(col_lote)
+        if col_fecha: columnas_pantalla.append(col_fecha)
         columnas_pantalla.extend(['Inventario Físico Bodega (A mano)', 'Inventario Máquina (A mano)', 'Consumo Registrado Semanal'])
+
+        # Formatear la visualización de la fecha en la tabla si existe
+        config_columnas = {}
+        if col_fecha:
+            config_columnas[col_fecha] = st.column_config.DatetimeColumn(format="DD/MM/YYYY")
 
         df_ingresado = st.data_editor(
             df_filtrado[columnas_pantalla],
             use_container_width=True,
             num_rows="dynamic",
-            disabled=[col_codigo, col_concentrado, col_lote] if col_lote else [col_codigo, col_concentrado],
-            key="tabla_maestra"
+            disabled=[col_codigo, col_concentrado, col_lote, col_fecha] if col_lote and col_fecha else [col_codigo, col_concentrado],
+            column_config=config_columnas,
+            key="tabla_maestra_cronologica"
         )
 
-        # --- PROCESAMIENTO MATEMÁTICO (FIFO) ---
-        if st.button("⚡ 3. Generar Informe y Aplicar FIFO", type="primary"):
-            with st.spinner("Ejecutando algoritmo FIFO..."):
+        # --- ANÁLISIS DE CONSUMO POR CRONOLOGÍA ---
+        if st.button("⚡ 3. Calcular Informe de Concentrado", type="primary"):
+            with st.spinner("Analizando consumos cronológicos de AX365..."):
                 df_proc = df_ingresado.copy()
                 df_proc['Inventario Físico Bodega (A mano)'] = pd.to_numeric(df_proc['Inventario Físico Bodega (A mano)'], errors='coerce').fillna(0)
                 df_proc['Inventario Máquina (A mano)'] = pd.to_numeric(df_proc['Inventario Máquina (A mano)'], errors='coerce').fillna(0)
@@ -142,7 +163,8 @@ if archivo_ax is not None:
                         continue
                         
                     gasto_restante = gasto_total
-                    indices_lotes = df_proc[df_proc[col_codigo] == codigo_ax].index
+                    # Al estar previamente ordenados, indices_lotes sigue estrictamente el orden de la fecha de ingreso
+                    indices_lotes = df_proc[df_proc[col_codigo] == codigo_ax].index 
                     
                     for idx in indices_lotes:
                         if gasto_restante <= 0:
@@ -155,28 +177,4 @@ if archivo_ax is not None:
                             df_proc.at[idx, 'stock sistema en inventario (unid)'] -= descuento
                             gasto_restante -= descuento
                             
-                            reporte_bajas.append({
-                                'Código AX': codigo_ax,
-                                'Concentrado': df_proc.at[idx, col_concentrado],
-                                'Lote Afectado': df_proc.at[idx, col_lote] if col_lote else f"Fila {idx+2}",
-                                'Cantidad Descontada': round(descuento, 4),
-                                'Stock Restante en Lote': round(df_proc.at[idx, 'stock sistema en inventario (unid)'], 4)
-                            })
-                            
-                    if gasto_restante > 0:
-                        alertas_quiebre.append(f"🚨 Inventario Insuficiente: Código AX {codigo_ax} requiere {gasto_total} unidades, faltaron {gasto_restante:.2f}.")
 
-                st.success("✨ ¡Informe Calculado Exitosamente!")
-                
-                # Preparar descarga Excel
-                salida_excel = io.BytesIO()
-                with pd.ExcelWriter(salida_excel, engine='openpyxl') as writer:
-                    df_proc.to_excel(writer, sheet_name='Informe Planilla Semanal', index=False)
-                    if reporte_bajas:
-                        pd.DataFrame(reporte_bajas).to_excel(writer, sheet_name='Detalle Lotes Consumidos', index=False)
-                salida_excel.seek(0)
-
-                st.download_button(
-                    label="📥 Descargar Informe Concentrado Semanal (.xlsx)",
-                    data=salida_excel,
-                    file_name="Informe_Concentrado_Semanal.xlsx",
