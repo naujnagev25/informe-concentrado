@@ -132,11 +132,8 @@ if archivo_ax is not None:
 
         # --- CRUCE Y CÁLCULO DE CONSUMO AUTOMÁTICO ---
         if 'df_maestro_tabla' not in st.session_state:
-            # Asignar stocks iniciales y finales mapeando por Código AX
             df_filtrado['Stock Inicial Local'] = df_filtrado[col_codigo].map(dict_inicial).fillna(0.0)
             df_filtrado['Stock Final Local'] = df_filtrado[col_codigo].map(dict_final).fillna(0.0)
-            
-            # Cálculo automático: Inicial - Final = Consumo Semanal (Garantiza análisis independiente por Código AX)
             df_filtrado['Consumo Registrado Semanal'] = (df_filtrado['Stock Inicial Local'] - df_filtrado['Stock Final Local']).clip(lower=0.0)
             st.session_state['df_maestro_tabla'] = df_filtrado.copy()
 
@@ -175,3 +172,6 @@ if archivo_ax is not None:
         st.markdown("---")
         if st.button("⚡ Calcular y Procesar Reporte", type="primary", use_container_width=True):
             with st.spinner("Procesando cálculos independientes por cada Código AX..."):
+                df_proc = st.session_state['df_maestro_tabla'].copy()
+                
+                df_proc['Stock Inicial Local'] = pd.to_numeric(df_proc['Stock Inicial Local'], errors='coerce').fillna(0)
