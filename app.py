@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import io
-# Importamos herramientas de openpyxl para darle el look profesional y futurista al Excel
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
@@ -10,13 +9,14 @@ st.set_page_config(page_title="Informe Concentrado Semanal", page_icon="📋", l
 
 st.title("📋 Informe Concentrado Semanal - Tienda Curicó")
 st.markdown("""
-### Consolidación y Generación de Reporte Corporativo:
+### Generación de Reporte de Consumo y Costos (Valores en CLP):
 1. **Carga los tres archivos independientes** (AX365, Stock de Máquina y Stock Físico).
-2. El sistema cruzará los datos, aplicará el orden cronológico por fecha de fabricación y calculará los consumos por lote.
-3. Al finalizar, descargará un **libro de Excel con diseño profesional y futurista**, incluyendo formato monetario automatizado y firmas de validación.
+2. El sistema filtrará automáticamente los concentrados *MCI TINTER, TWIST y Transparentes*.
+3. Los lotes se ordenarán cronológicamente por su **Fecha de fabricación** (desde el más antiguo).
+4. El programa calculará la **Cantidad Consumida** y el **Gasto en Pesos Chilenos (CLP)** por lote, exportando un archivo Excel con diseño profesional.
 """)
 
-# --- DICCIONARIO MAESTRO DE COSTOS BASE ---
+# --- DICCIONARIO MAESTRO DE COSTOS BASE EN PESOS CHILENOS (CLP) ---
 COSTOS_BASE_MAESTROS = {
     "13342919": 31942, "13344019": 31317, "13344319": 82671, "13344419": 43103,
     "13344519": 75731, "13344619": 28040, "13344719": 58265, "13344819": 43768,
@@ -89,7 +89,7 @@ df_limpio[col_codigo] = df_limpio[col_codigo].astype(str).str.strip().str.replac
 if col_inv_ax:
     df_limpio[col_inv_ax] = pd.to_numeric(df_limpio[col_inv_ax], errors='coerce').fillna(0.0)
 
-df_limpio['Costo unitario ($)'] = df_limpio[col_codigo].map(COSTOS_BASE_MAESTROS).fillna(0.0)
+df_limpio['Costo unitario (CLP)'] = df_limpio[col_codigo].map(COSTOS_BASE_MAESTROS).fillna(0)
 
 if col_fecha:
     df_limpio[col_fecha] = pd.to_datetime(df_limpio[col_fecha], errors='coerce')
@@ -139,31 +139,36 @@ columnas_pantalla = [col_codigo, col_concentrado]
 if col_lote: columnas_pantalla.append(col_lote)
 if col_fecha: columnas_pantalla.append(col_fecha)
 if col_inv_ax: columnas_pantalla.append(col_inv_ax)
-columnas_pantalla.extend(['Costo unitario ($)', 'Inventario Físico Bodega (A mano)', 'Inventario Máquina (A mano)', 'Consumo Registrado Semanal'])
+columnas_pantalla.extend(['Costo unitario (CLP)', 'Inventario Físico Bodega (A mano)', 'Inventario Máquina (A mano)', 'Consumo Registrado Semanal'])
+
+config_columnas = {}
+if col_fecha:
+    config_columnas[col_fecha] = st.column_config.DatetimeColumn(format="DD/MM/YYYY")
+config_columnas['Costo unitario (CLP)'] = st.column_config.NumberColumn(format="$ %d")
 
 df_ingresado = st.data_editor(
     df_filtrado[columnas_pantalla],
     use_container_width=True,
     num_rows="dynamic",
     disabled=[col_codigo, col_concentrado, col_lote, col_fecha, col_inv_ax] if col_lote and col_fecha and col_inv_ax else [col_codigo, col_concentrado],
+    column_config=config_columnas,
     key="tabla_maestra_cronologica"
 )
 
-# --- PROCESAMIENTO Y DISEÑO DEL EXCEL FUTURISTA ---
-if st.button("⚡ 3. Generar Reporte Ejecutivo Avanzado", type="primary"):
-    with st.spinner("Procesando datos y aplicando diseño futurista corporativo..."):
+# --- PROCESAMIENTO Y DISEÑO DEL INFORME DE CONSUMO ---
+if st.button("⚡ 3. Generar Informe de Consumos y Costos", type="primary"):
+    with st.spinner("Procesando consumos por lote y estructurando costos en CLP..."):
         df_proc = df_ingresado.copy()
         df_proc['Inventario Físico Bodega (A mano)'] = pd.to_numeric(df_proc['Inventario Físico Bodega (A mano)'], errors='coerce').fillna(0)
         df_proc['Inventario Máquina (A mano)'] = pd.to_numeric(df_proc['Inventario Máquina (A mano)'], errors='coerce').fillna(0)
         df_proc['Consumo Registrado Semanal'] = pd.to_numeric(df_proc['Consumo Registrado Semanal'], errors='coerce').fillna(0)
-        df_proc['Costo unitario ($)'] = pd.to_numeric(df_proc['Costo unitario ($)'], errors='coerce').fillna(0)
+        df_proc['Costo unitario (CLP)'] = pd.to_numeric(df_proc['Costo unitario (CLP)'], errors='coerce').fillna(0).astype(int)
         
-        # Stock Local Inicial
         df_proc['stock sistema en inventory (unid)'] = df_proc['Inventario Físico Bodega (A mano)'] + df_proc['Inventario Máquina (A mano)']
         dict_consumos = df_proc.groupby(col_codigo)['Consumo Registrado Semanal'].sum().to_dict()
         
         reporte_bajas = []
-        gasto_consolidado_total = 0.0
+        gasto_consolidado_total = 0
 
         for codigo_ax, gasto_total in dict_consumos.items():
             if gasto_total <= 0 or str(codigo_ax).lower() == 'nan':
@@ -179,7 +184,3 @@ if st.button("⚡ 3. Generar Reporte Ejecutivo Avanzado", type="primary"):
                     descuento = min(stock_lote_actual, gasto_restante)
                     df_proc.at[idx, 'stock sistema en inventory (unid)'] -= descuento
                     gasto_restante -= descuento
-                    
-                    val_fecha = df_proc.at[idx, col_fecha] if col_fecha else None
-                    fecha_str = val_fecha.strftime('%d/%m/%Y') if col_fecha and pd.notna(val_fecha) else "N/A"
-
