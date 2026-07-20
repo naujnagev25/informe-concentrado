@@ -7,11 +7,11 @@ st.set_page_config(page_title="Informe Concentrado Semanal", page_icon="📋", l
 
 st.title("📋 Informe Concentrado Semanal - Tienda Curicó")
 st.markdown("""
-### Proceso de Carga y Consolidación de Datos:
+### Proceso de Carga y Consolidación de Datos (AX365):
 1. **Carga los tres archivos independientes** (AX365, Stock de Máquina y Stock Físico).
 2. El sistema filtrará automáticamente los concentrados *MCI TINTER, TWIST y Transparentes*.
-3. El sistema **ordenará automáticamente los lotes por fecha de ingreso** (de la más antigua a la más nueva).
-4. Al procesar, el sistema analizará qué lote se consumió según su orden cronológico de entrada en AX.
+3. El sistema **ordenará automáticamente los lotes por Fecha de fabricación** (desde el más antiguo).
+4. El programa analizará **cuánto se consumió por lote en la semana**, descontando cronológicamente.
 """)
 
 # --- SECCIÓN DE CARGA DE ARCHIVOS INDEPENDIENTES ---
@@ -19,7 +19,7 @@ st.subheader("📁 1. Accesos para Carga de Datos")
 col1, col2, col3 = st.columns(3)
 
 with col1:
-    archivo_ax = st.file_uploader("📥 Datos de AX365 (.xlsx)", type=["xlsx"], help="Base principal con códigos, lotes y fechas del ERP")
+    archivo_ax = st.file_uploader("📥 Datos de AX365 (.xlsx)", type=["xlsx"], help="Base principal de AX365")
 with col2:
     archivo_maquina = st.file_uploader("📥 Stock de la Máquina (.xlsx, .csv)", type=["xlsx", "csv"])
 with col3:
@@ -37,7 +37,7 @@ if archivo_ax is None:
     st.info("💡 Por favor, sube el archivo de datos de AX365 para comenzar.")
     st.stop()
 
-# --- LECTURA DIRECTA SIN BLOQUES INTERNOS ---
+# --- LECTURA DIRECTA DE AX365 ---
 excel_book = pd.ExcelFile(archivo_ax)
 hojas = excel_book.sheet_names
 hoja_seleccionada = st.selectbox("Selecciona la pestaña del reporte AX365:", hojas, index=0)
@@ -45,41 +45,50 @@ hoja_seleccionada = st.selectbox("Selecciona la pestaña del reporte AX365:", ho
 df_original = pd.read_excel(archivo_ax, sheet_name=hoja_seleccionada)
 df_original.columns = df_original.columns.str.strip()
 
-# --- DETECCIÓN AUTOMÁTICA DE COLUMNAS ---
-col_codigo = detectar_columna_ax(df_original, ['código ax', 'codigo ax', 'artículo', 'articulo', 'item'])
-col_concentrado = detectar_columna_ax(df_original, ['concentrado', 'nombre', 'producto'])
-col_lote = detectar_columna_ax(df_original, ['lotes consumidos', 'lote', 'batch', 'número de lote'])
-col_fecha = detectar_columna_ax(df_original, ['fecha', 'ingreso', 'creación', 'creacion', 'registro', 'f. ingreso'])
+# --- DETECCIÓN DE COLUMNAS SOLICITADAS ---
+col_codigo = detectar_columna_ax(df_original, ['código de artículo', 'codigo de articulo', 'código ax', 'artículo'])
+col_lote = detectar_columna_ax(df_original, ['número de lote', 'numero de lote', 'lote', 'batch'])
+col_fecha = detectar_columna_ax(df_original, ['fecha de fabricación', 'fecha de fabricacion', 'fabricación'])
+col_concentrado = detectar_columna_ax(df_original, ['concentrado', 'nombre', 'producto', 'descripción'])
 
-if not col_codigo:
-    st.error("🚨 Error: No se encontró la columna de 'Código AX' en el archivo de AX365.")
+# Forzar nombres estándar si la detección automática fue exitosa para evitar conflictos
+if col_codigo: df_original = df_original.rename(columns={col_codigo: 'Código de artículo'})
+if col_lote: df_original = df_original.rename(columns={col_lote: 'Número de lote'})
+if col_fecha: df_original = df_original.rename(columns={col_fecha: 'Fecha de fabricación'})
+if col_concentrado: df_original = df_original.rename(columns={col_concentrado: 'Concentrado'})
+
+# Re-asignar nombres fijos para el resto del script
+col_codigo = 'Código de artículo'
+col_lote = 'Número de lote' if 'Número de lote' in df_original.columns else None
+col_fecha = 'Fecha de fabricación' if 'Fecha de fabricación' in df_original.columns else None
+col_concentrado = 'Concentrado'
+
+if col_codigo not in df_original.columns:
+    st.error("🚨 Error: No se encontró la columna 'Código de artículo' en el archivo de AX365.")
     st.stop()
-    
-if not col_concentrado:
+if col_concentrado not in df_original.columns:
     st.error("🚨 Error: No se encontró la columna de descripción del producto ('Concentrado') en AX365.")
     st.stop()
 
-# Limpieza inicial de la base de datos
+# Limpieza inicial de filas vacías
 df_limpio = df_original.dropna(subset=[col_codigo, col_concentrado]).copy()
 df_limpio[col_codigo] = df_limpio[col_codigo].astype(str).str.strip().str.replace(r'\.0$', '', regex=True)
 
-# --- PROCESAMIENTO DE FECHAS ---
+# --- ORDENAMIENTO POR FECHA DE FABRICACIÓN (ANTIGUO A NUEVO) ---
 if col_fecha:
     df_limpio[col_fecha] = pd.to_datetime(df_limpio[col_fecha], errors='coerce')
     df_limpio = df_limpio.sort_values(by=[col_fecha], ascending=True, na_position='last')
-    st.toast("📅 Lotes ordenados por fecha de ingreso correctamente.", icon="⏳")
+    st.toast("📅 Lotes ordenados por 'Fecha de fabricación' (más antiguos primero).", icon="⏳")
 else:
-    st.warning("⚠️ No se detectó una columna de 'Fecha' o 'Ingreso'. El sistema usará el orden original del archivo.")
+    st.warning("⚠️ No se detectó la columna 'Fecha de fabricación'. Se usará el orden del archivo.")
 
 # --- FILTRO ESTRICTO DE CONCENTRADOS SOLICITADOS ---
 df_limpio['Concentrado_Minuscula'] = df_limpio[col_concentrado].astype(str).str.lower().str.strip()
 
 condicion_mci = df_limpio['Concentrado_Minuscula'].str.contains('mci tinter', na=False)
 condicion_twist = df_limpio['Concentrado_Minuscula'].str.contains('twist', na=False)
-
 condicion_rojo_ox = (df_limpio['Concentrado_Minuscula'].str.contains('transparente rojo', na=False) | 
                      (df_limpio['Concentrado_Minuscula'].str.contains('transparente', na=False) & df_limpio['Concentrado_Minuscula'].str.contains('rojo', na=False)))
-                     
 condicion_amarillo_ox = (df_limpio['Concentrado_Minuscula'].str.contains('transparente amarillo', na=False) | 
                          (df_limpio['Concentrado_Minuscula'].str.contains('transparente', na=False) & df_limpio['Concentrado_Minuscula'].str.contains('amarillo', na=False)))
 
@@ -87,10 +96,10 @@ df_filtrado = df_limpio[condicion_mci | condicion_twist | condicion_rojo_ox | co
 df_filtrado = df_filtrado.drop(columns=['Concentrado_Minuscula'])
 
 if df_filtrado.empty:
-    st.warning("⚠️ No se encontraron concentrados válidos en la pestaña seleccionada.")
+    st.warning("⚠️ No se encontraron los concentrados solicitados con los filtros actuales.")
     st.stop()
 
-# --- PROCESAMIENTO DE CARGAS DE STOCK ---
+# --- PROCESAMIENTO DE CARGAS EXTERNAS DE STOCK ---
 dict_maquina = {}
 dict_bodega = {}
 
@@ -101,7 +110,7 @@ def procesar_archivo_externo(archivo):
         df_ext = pd.read_excel(archivo)
     df_ext.columns = df_ext.columns.str.strip()
     
-    c_cod = detectar_columna_ax(df_ext, ['código ax', 'codigo ax', 'artículo', 'articulo', 'item'])
+    c_cod = detectar_columna_ax(df_ext, ['código de artículo', 'codigo de articulo', 'código ax', 'artículo', 'item'])
     c_cant = detectar_columna_ax(df_ext, ['cantidad', 'stock', 'físico', 'fisico', 'total', 'unidades'])
     
     if c_cod and c_cant:
@@ -113,7 +122,6 @@ def procesar_archivo_externo(archivo):
 if archivo_maquina is not None:
     dict_maquina = procesar_archivo_externo(archivo_maquina)
     st.toast("✅ Datos de la Máquina vinculados", icon="⚙️")
-    
 if archivo_bodega is not None:
     dict_bodega = procesar_archivo_externo(archivo_bodega)
     st.toast("✅ Datos de Bodega vinculados", icon="📦")
@@ -124,8 +132,8 @@ df_filtrado['Inventario Máquina (A mano)'] = df_filtrado[col_codigo].map(dict_m
 df_filtrado['Consumo Registrado Semanal'] = 0.0
 
 # --- MÓDULO INTERACTIVO DE PANTALLA ---
-st.subheader(f"📝 2. Módulo de Validación y Ajustes ({len(df_filtrado)} filas ordenadas por antigüedad)")
-st.info("La tabla ya viene ordenada con los registros más antiguos arriba. Digita los consumos de la semana.")
+st.subheader(f"📝 2. Módulo de Validación y Ajustes ({len(df_filtrado)} filas ordenadas por Fecha de fabricación)")
+st.info("Revisa los datos cruzados e ingresa el 'Consumo Registrado Semanal' para realizar el cálculo por lote.")
 
 columnas_pantalla = [col_codigo, col_concentrado]
 if col_lote: columnas_pantalla.append(col_lote)
@@ -145,9 +153,9 @@ df_ingresado = st.data_editor(
     key="tabla_maestra_cronologica"
 )
 
-# --- ANÁLISIS DE CONSUMO POR CRONOLOGÍA ---
+# --- ANÁLISIS DE CUANTO SE CONSUMIÓ POR LOTE EN LA SEMANA ---
 if st.button("⚡ 3. Calcular Informe de Concentrado", type="primary"):
-    with st.spinner("Analizando consumos cronológicos de AX365..."):
+    with st.spinner("Calculando consumos semanales por lote antiguo..."):
         df_proc = df_ingresado.copy()
         df_proc['Inventario Físico Bodega (A mano)'] = pd.to_numeric(df_proc['Inventario Físico Bodega (A mano)'], errors='coerce').fillna(0)
         df_proc['Inventario Máquina (A mano)'] = pd.to_numeric(df_proc['Inventario Máquina (A mano)'], errors='coerce').fillna(0)
@@ -158,7 +166,7 @@ if st.button("⚡ 3. Calcular Informe de Concentrado", type="primary"):
         dict_consumos = df_proc.groupby(col_codigo)['Consumo Registrado Semanal'].sum().to_dict()
         
         reporte_bajas = []
-        columnas_reporte = ['Código AX', 'Concentrado', 'Lote', 'Fecha de Ingreso', 'Cantidad Consumida', 'Stock Restante en Lote']
+        columnas_reporte = ['Código de artículo', 'Concentrado', 'Número de lote', 'Fecha de fabricación', 'Cantidad Consumida en la Semana', 'Stock Restante en Lote']
         alertas_quiebre = []
 
         for codigo_ax, gasto_total in dict_consumos.items():
@@ -180,23 +188,5 @@ if st.button("⚡ 3. Calcular Informe de Concentrado", type="primary"):
                     gasto_restante -= descuento
                     
                     val_fecha = df_proc.at[idx, col_fecha] if col_fecha else None
-                    if col_fecha and pd.notna(val_fecha):
-                        fecha_str = val_fecha.strftime('%d/%m/%Y')
-                    else:
-                        fecha_str = "N/A"
-                        
+                    fecha_str = val_fecha.strftime('%d/%m/%Y') if col_fecha and pd.notna(val_fecha) else "N/A"
                     lote_str = str(df_proc.at[idx, col_lote]) if col_lote else "N/A"
-                    desc_str = str(df_proc.at[idx, col_concentrado])
-                    st_restante = round(df_proc.at[idx, 'stock sistema en inventory (unid)'], 4)
-                    
-                    fila_reporte = [codigo_ax, desc_str, lote_str, fecha_str, round(descuento, 4), st_restante]
-                    reporte_bajas.append(fila_reporte)
-                    
-            if gasto_restante > 0:
-                alertas_quiebre.append(f"🚨 Faltante de Stock: Código AX {codigo_ax} registró consumo de {gasto_total} unidades, faltaron {gasto_restante:.2f}.")
-
-        st.success("✨ ¡Informe de Concentrado procesado con éxito!")
-        
-        if col_fecha and col_fecha in df_proc.columns:
-            df_proc[col_fecha] = df_proc[col_fecha].dt.strftime('%Y-%m-%d')
-
