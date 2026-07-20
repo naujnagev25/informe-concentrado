@@ -197,5 +197,6 @@ if st.button("⚡ 3. Calcular Informe de Concentrado", type="primary"):
 
         st.success("✨ ¡Informe de Concentrado procesado con éxito!")
         
-        # Corrección de formato para evitar fallas de visualización de fechas en el reporte final
         if col_fecha and col_fecha in df_proc.columns:
+            df_proc[col_fecha] = df_proc[col_fecha].dt.strftime('%Y-%m-%d')
+
