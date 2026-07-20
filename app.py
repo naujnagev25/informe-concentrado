@@ -9,11 +9,11 @@ st.set_page_config(page_title="Informe Concentrado Semanal", page_icon="📋", l
 
 st.title("📋 Informe Concentrado Semanal - Tienda Curicó")
 st.markdown("""
-### Consolidación Automatizada por Lote e Inmune a Recargas:
+### Consolidación Automatizada (Excluyendo Lotes en 0):
 1. **Carga los tres archivos independientes** (AX365 base, Stock Inicial y Stock Final).
-2. El sistema ordenará las categorías en orden: **MCI TINTER** ➡️ **TRANSPARENTES** ➡️ **TWIST**.
-3. El programa calculará de forma automática el consumo neto de la semana por cada **Código AX** (Inicial - Final).
-4. Presiona el botón **⚡ Calcular y Procesar Reporte**. El algoritmo FIFO descontará desde el lote más antiguo según el orden natural del archivo de AX365 (ej. `LT63010`).
+2. El sistema filtrará y ordenará los grupos: **MCI TINTER** ➡️ **TRANSPARENTES** ➡️ **TWIST**.
+3. **El sistema ignorará automáticamente todos los lotes cuyo inventario físico sea 0.**
+4. Presiona el botón **⚡ Calcular y Procesar Reporte** para ejecutar el algoritmo FIFO por cada Código AX independiente.
 """)
 
 # --- DICCIONARIO MAESTRO DE COSTOS BASE EN PESOS CHILENOS (CLP) ---
@@ -46,7 +46,7 @@ def detectar_columna_ax(df, palabras_clave):
             return col
     return None
 
-# Inicializar estados de control en la sesión para evitar pérdidas de datos al hacer clics
+# Inicializar estados de control en la sesión
 if 'calculo_exitoso' not in st.session_state:
     st.session_state['calculo_exitoso'] = False
 if 'datos_tabla_maestra' not in st.session_state:
@@ -86,6 +86,8 @@ if archivo_ax is not None:
 
         if col_inv_ax:
             df_limpio[col_inv_ax] = pd.to_numeric(df_limpio[col_inv_ax], errors='coerce').fillna(0.0)
+            # --- FILTRO CLAVE: EXCLUIR FILAS DONDE EL STOCK SEA 0 O MENOR ---
+            df_limpio = df_limpio[df_limpio[col_inv_ax] > 0.0].copy()
 
         df_limpio['Costo unitario (CLP)'] = df_limpio[col_codigo].map(COSTOS_BASE_MAESTROS).fillna(0).astype(int)
 
@@ -97,7 +99,7 @@ if archivo_ax is not None:
         condicion_transparente = (df_limpio['Concentrado_Minuscula'].str.contains('transparente', na=False)) & \
                                  (df_limpio['Concentrado_Minuscula'].str.contains('rojo', na=False) | df_limpio['Concentrado_Minuscula'].str.contains('amarillo', na=False))
 
-        # Asignar prioridad de grupo conservando estrictamente el orden de llegada de las filas de AX
+        # Asignar prioridad de grupo
         df_limpio['Orden_Categoria'] = 99
         df_limpio.loc[condicion_mci, 'Orden_Categoria'] = 1          # 1° MCI TINTER
         df_limpio.loc[condicion_transparente, 'Orden_Categoria'] = 2   # 2° TRANSPARENTES
@@ -105,7 +107,7 @@ if archivo_ax is not None:
 
         df_filtrado = df_limpio[df_limpio['Orden_Categoria'] != 99].copy()
         
-        # Ordenamos por categoría de producto, pero PRESERVAMOS el orden original de las filas internas de AX
+        # Ordenamos por categoría de producto, preservando el orden natural del archivo de AX
         df_filtrado = df_filtrado.sort_values(by=['Orden_Categoria'], ascending=True, kind='mergesort')
         df_filtrado = df_filtrado.drop(columns=['Concentrado_Minuscula', 'Orden_Categoria'])
 
@@ -135,7 +137,7 @@ if archivo_ax is not None:
             st.session_state['datos_tabla_maestra'] = df_filtrado.copy()
 
         st.subheader("📝 2. Módulo de Validación y Ajustes")
-        st.info("Los consumos semanales se calcularon automáticamente (Inicial - Final). El algoritmo FIFO evaluará cada Código AX por separado.")
+        st.warning(f"💡 Se omitieron automáticamente los lotes en cero. Actualmente visualizando {len(df_filtrado)} registros activos con existencias.")
 
         columnas_pantalla = [col_codigo, col_concentrado]
         if col_lote: columnas_pantalla.append(col_lote)
@@ -158,7 +160,6 @@ if archivo_ax is not None:
             key="tabla_maestra_cronologica"
         )
         
-        # Sincronizar cambios inmediatamente en la sesión persistente
         st.session_state['datos_tabla_maestra'].update(df_ingresado)
 
         # --- BOTÓN MAESTRO DE CÁLCULO ---
@@ -171,4 +172,5 @@ if archivo_ax is not None:
             df_proc['Consumo Registrado Semanal'] = pd.to_numeric(df_proc['Consumo Registrado Semanal'], errors='coerce').fillna(0)
             df_proc['Costo unitario (CLP)'] = pd.to_numeric(df_proc['Costo unitario (CLP)'], errors='coerce').fillna(0).astype(int)
             
-            # El stock inicial disponible del lote corresponde a lo cargado en Stock Inicial Local
+            # El inventario a rebajar corresponde al Stock Inicial Local cargado en la tienda
+            df_proc['stock sistema en inventory (unid)'] = df_proc['Stock Inicial Local']
