@@ -171,7 +171,7 @@ if archivo_ax is not None:
         # --- BOTÓN MAESTRO DE CÁLCULO ---
         st.markdown("---")
         if st.button("⚡ Calcular y Procesar Reporte", type="primary", use_container_width=True):
-            with st.spinner("Procesando cálculos independientes por cada Código AX..."):
-                df_proc = st.session_state['df_maestro_tabla'].copy()
-                
-                df_proc['Stock Inicial Local'] = pd.to_numeric(df_proc['Stock Inicial Local'], errors='coerce').fillna(0)
+            df_proc = st.session_state['df_maestro_tabla'].copy()
+            
+            df_proc['Stock Inicial Local'] = pd.to_numeric(df_proc['Stock Inicial Local'], errors='coerce').fillna(0)
+            df_proc['Stock Final Local'] = pd.to_numeric(df_proc['Stock Final Local'], errors='coerce').fillna(0)
